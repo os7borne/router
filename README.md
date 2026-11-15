@@ -23,7 +23,7 @@ Grab the latest `Router-vX.Y.Z.zip` from the [Releases](../../releases) page, un
 
 ## Build and install
 ```sh
-git clone <your-fork-or-repo-url> router
+git clone https://github.com/os7borne/router.git router
 cd router
 ./build.sh            # builds build/Router.app
 ./build.sh install    # also copies it to /Applications
