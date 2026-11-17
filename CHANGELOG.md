@@ -4,6 +4,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-17
+- The public-network warning is now one slim row, with a single button that fits the current Tailscale state.
+- Diagnostics sections work as an accordion: one open at a time, with short summaries when collapsed.
+- Switching tabs swipes the old content out and the new content in, and the popover's content no longer drifts while it resizes.
+- The connected network's detail line is no longer cut off.
+
 ## [0.2.0] - 2026-11-17
 - Automatic updates through Sparkle. Check from the gear menu or Settings → Updates.
 - Simpler popup: the status card and network list collapse while the connection is good, and open when it isn't.

@@ -10,16 +10,31 @@ struct ContentView: View {
     @State private var pwFor: String?
     @State private var pw = ""
     @State private var band = "5 GHz"
-    @State private var forward = true
+    /// Tab swipe: the old tab slides out while the new one slides in. Only these offsets animate, never the popover's size.
+    @State private var outgoing: Tab?
+    @State private var slide: CGFloat = 1      // 0 = just switched, 1 = settled
+    @State private var slideDir: CGFloat = 1   // +1 = moving right (new tab enters from the right)
+    @State private var slideToken = 0
     /// nil = automatic (open when something is wrong, collapsed when all is well); true/false = the user's choice.
     @State private var statusOpen: Bool?
     @State private var listOpen: Bool?
-    @State private var openSections: Set<String> = ["live", "nearby", "speed"]
+    /// Diagnostics works as an accordion: one section open at a time.
+    @State private var openSection: String? = "live"
 
     var statusOpenNow: Bool { statusOpen ?? !w.healthy }
     var listOpenNow: Bool { listOpen ?? !w.healthy }
 
     var body: some View {
+        // Content is pinned to the top; spare height (while the popover resizes) goes to the spacer below.
+        VStack(spacing: 0) {
+            content
+            Spacer(minLength: 0)
+        }
+        .frame(width: 380)
+        .background(SwipeCatcher { dir in step(dir) })
+    }
+
+    var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if w.locationDenied { locationBanner }
@@ -35,17 +50,10 @@ struct ContentView: View {
             }
             if w.powered {
                 tabBar
-                ZStack {
-                    switch tab {
-                    case .networks: networkList
-                    case .diagnostics: diagnostics
-                    case .places: PlacesView(t: w.tracker)
-                    }
+                ZStack(alignment: .top) {
+                    if let o = outgoing { tabView(o).offset(x: -slideDir * slide * 348).allowsHitTesting(false) }
+                    tabView(tab).offset(x: slideDir * (1 - slide) * 348)
                 }
-                .id(tab)
-                .transition(.asymmetric(
-                    insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-                    removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
                 .frame(height: contentHeight, alignment: .top).clipped()
             }
             Divider()
@@ -53,15 +61,12 @@ struct ContentView: View {
         }
         .padding(16)
         .frame(width: 380)
-        .background(SwipeCatcher { dir in step(dir) })
-        .animation(.easeOut(duration: 0.2), value: statusOpenNow)
-        .animation(.easeOut(duration: 0.2), value: listOpenNow)
         .onChange(of: w.status) { _ in statusOpen = nil; listOpen = nil }
         .onChange(of: w.ssid) { _ in statusOpen = nil; listOpen = nil }
     }
 
     /// The Networks panel shrinks to a couple of rows while everything is fine.
-    var contentHeight: CGFloat { tab == .networks && !listOpenNow ? 96 : 340 }
+    var contentHeight: CGFloat { tab == .networks && !listOpenNow ? 84 : 340 }
 
     /// Move to the next (+1) or previous (-1) panel.
     func step(_ dir: Int) {
@@ -72,11 +77,26 @@ struct ContentView: View {
         select(all[n])
     }
 
+    @ViewBuilder func tabView(_ t: Tab) -> some View {
+        switch t {
+        case .networks: networkList
+        case .diagnostics: diagnostics
+        case .places: PlacesView(t: w.tracker)
+        }
+    }
+
     func select(_ t: Tab) {
         guard t != tab else { return }
         let all = Tab.allCases
-        forward = (all.firstIndex(of: t) ?? 0) > (all.firstIndex(of: tab) ?? 0)
-        withAnimation(.easeOut(duration: 0.22)) { tab = t }
+        let fwd = (all.firstIndex(of: t) ?? 0) > (all.firstIndex(of: tab) ?? 0)
+        slideToken += 1
+        let token = slideToken
+        // Swap the tab (and resize the popover) instantly, then slide only the content.
+        // Animating the swap itself makes the popover's content drift while it changes height.
+        var tx = Transaction(); tx.disablesAnimations = true
+        withTransaction(tx) { outgoing = tab; slideDir = fwd ? 1 : -1; slide = 0; tab = t }
+        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.26)) { slide = 1 } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { if slideToken == token { outgoing = nil } }
     }
 
     var tabBar: some View {
@@ -200,7 +220,7 @@ struct ContentView: View {
                 Image(systemName: "wifi.exclamationmark").foregroundStyle(.red)
                 Text("Connected, but no internet.").font(.caption)
                 Spacer()
-                Button("Diagnose") { select(.diagnostics); openSections.insert("tools"); w.runDiagnostics() }.buttonStyle(Pill())
+                Button("Diagnose") { select(.diagnostics); openSection = "tools"; w.runDiagnostics() }.buttonStyle(Pill())
             }.padding(10).background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         } else if w.status == .weak, w.betterOption == nil {
             HStack {
@@ -211,73 +231,55 @@ struct ContentView: View {
     }
 
     // MARK: public network advisory
+    /// One slim row. Details are in the tooltip; the button does the one useful thing for the current VPN state.
     @ViewBuilder var publicCard: some View {
         if w.onPublicNetwork, w.warnPublic, let s = w.ssid, !w.mutedPublic.contains(s) {
             if let node = w.vpn.exitNode {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.good)
-                    Text("**Protected** · Tailscale exit node \(node)").font(.caption)
+                    Text("**Protected** · exit node \(node)").font(.system(size: 11.5))
                     Spacer(minLength: 0)
-                }.padding(10).background(Theme.good.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
+                }.padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.good.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "exclamationmark.shield").font(.system(size: 20)).foregroundStyle(Theme.warn)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("This is a public network").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.warn)
-                            Text("Other people on it may see unencrypted traffic, and the sign-in page can log your device. A VPN keeps your browsing private.")
-                                .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.shield").font(.system(size: 17)).foregroundStyle(Theme.warn)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Public network").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+                        Text(publicSubtitle).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
-                    vpnRow
-                    HStack {
-                        Spacer()
-                        Button("Don't warn me here") { w.muteWarning(s) }.buttonStyle(.plain)
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
+                    Spacer(minLength: 4)
+                    publicAction
+                    Button { w.muteWarning(s) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("Don't warn me on this network")
                 }
-                .padding(12)
-                .background(Theme.warn.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.warn.opacity(0.35), lineWidth: 1))
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Theme.warn.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.warn.opacity(0.30), lineWidth: 1))
+                .help("Other people on a public network may see unencrypted traffic, and its sign-in page can log your device. A VPN keeps your browsing private.")
             }
         }
     }
 
-    @ViewBuilder var vpnRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "network.badge.shield.half.filled").font(.system(size: 14)).foregroundStyle(.secondary)
-                .frame(width: 28, height: 28).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-            if !w.vpn.installed {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("No VPN found").font(.system(size: 12, weight: .semibold))
-                    Text("Tailscale is a free option").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Get Tailscale") { NSWorkspace.shared.open(URL(string: "https://tailscale.com/download")!) }
-                    .buttonStyle(Pill(fill: Theme.accent, fg: .black))
-            } else if !w.vpn.running {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Tailscale is off").font(.system(size: 12, weight: .semibold))
-                    Text("Turn it on to protect this connection").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Turn on") { w.enableVPN() }.buttonStyle(Pill(fill: Theme.accent, fg: .black))
-            } else if let opt = w.vpn.exitOption, let ip = w.vpn.exitOptionIP {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Tailscale is on").font(.system(size: 12, weight: .semibold))
-                    Text("Exit node available: \(opt)").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Use \(opt)") { w.useExitNode(ip) }.buttonStyle(Pill(fill: Theme.accent, fg: .black))
-            } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Tailscale is on").font(.system(size: 12, weight: .semibold))
-                    Text("No exit node set up, so web traffic still uses this network").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
+    var publicSubtitle: String {
+        if !w.vpn.installed { return "A VPN keeps your browsing private" }
+        if !w.vpn.running { return "Tailscale is off" }
+        if let o = w.vpn.exitOption { return "Tailscale on · exit node \(o) available" }
+        return "Tailscale on · no exit node set"
+    }
+
+    @ViewBuilder var publicAction: some View {
+        if !w.vpn.installed {
+            Button("Get Tailscale") { NSWorkspace.shared.open(URL(string: "https://tailscale.com/download")!) }
+                .buttonStyle(Pill(fill: Theme.accent, fg: .black))
+        } else if !w.vpn.running {
+            Button("Turn on") { w.enableVPN() }.buttonStyle(Pill(fill: Theme.accent, fg: .black))
+        } else if let o = w.vpn.exitOption, let ip = w.vpn.exitOptionIP {
+            Button("Use \(o)") { w.useExitNode(ip) }.buttonStyle(Pill(fill: Theme.accent, fg: .black))
+        } else {
+            Button("Open Tailscale") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Tailscale.app")) }
+                .buttonStyle(Pill())
         }
-        .padding(10).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     var locationBanner: some View {
@@ -427,7 +429,6 @@ struct ContentView: View {
         else if n.known { parts.append("Known") }
         parts.append(WiFiManager.quality(rssi: n.rssi).word)
         parts.append(n.band)
-        if !n.secure { parts.append("No password") }
         if w.showTech { parts.append("\(n.rssi) dBm") }
         return parts.joined(separator: " · ")
     }
@@ -437,36 +438,37 @@ struct ContentView: View {
         Task { await w.connect(n, password: p) }
     }
 
-    // MARK: diagnostics tab (live link, nearby channels, speed test, tools)
+    // MARK: diagnostics tab (accordion: one section open at a time)
     var diagnostics: some View {
         ScrollView {
             VStack(spacing: 8) {
-                section("live", "Your connection, live", "Last \(max(1, w.samples.count * 4 / 60)) min") { liveBody }
+                section("live", "Your connection, live", w.stability.map { $0.color == Theme.good ? "Stable" : "Dropouts" } ?? "Collecting…") { liveBody }
                 section("nearby", "Nearby channels", "\(w.aps.count) nearby") { signalsBody }
-                speedCard
-                section("tools", "Tools", "Check, reconnect") { diagBody }
+                section("speed", "Speed test", w.history.first.map { String(format: "%.0f Mbps down", $0.down) } ?? "Not run yet") { speedBody }
+                section("tools", "Tools", w.diagVerdict.isEmpty ? "Check, reconnect" : w.diagVerdict) { diagBody }
             }
         }
     }
 
-    func section<C: View>(_ key: String, _ title: String, _ trailing: String = "", @ViewBuilder _ content: () -> C) -> some View {
-        let open = openSections.contains(key)
-        return VStack(alignment: .leading, spacing: 8) {
+    func section<C: View>(_ key: String, _ title: String, _ summary: String, @ViewBuilder _ content: () -> C) -> some View {
+        let open = openSection == key
+        return VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    if open { openSections.remove(key) } else { openSections.insert(key) }
-                }
+                withAnimation(.easeInOut(duration: 0.22)) { openSection = open ? nil : key }
             } label: {
-                HStack {
+                HStack(spacing: 8) {
                     Text(title).font(.system(size: 12, weight: .semibold))
-                    Spacer()
-                    if !trailing.isEmpty && !open { Text(trailing).font(.system(size: 10)).foregroundStyle(.secondary) }
-                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(summary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).opacity(open ? 0 : 1)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(open ? 180 : 0))
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain)
-            if open { content() }
+            if open { content().padding(.top, 10).transition(.opacity) }
         }
-        .card(12)
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipped()
     }
 
     var signalsBody: some View {
@@ -491,7 +493,7 @@ struct ContentView: View {
                 }
             }
             VStack(spacing: 0) {
-                ForEach(w.aps.prefix(6)) { ap in
+                ForEach(w.aps.prefix(4)) { ap in
                     HStack(spacing: 6) {
                         Text(ap.ssid).lineLimit(1).font(.caption)
                             .fontWeight(ap.ssid == w.ssid ? .semibold : .regular)
@@ -518,7 +520,7 @@ struct ContentView: View {
                     LineMark(x: .value("t", s.t), y: .value("dBm", s.rssi)).foregroundStyle(.blue)
                     AreaMark(x: .value("t", s.t), yStart: .value("floor", -95), yEnd: .value("dBm", s.rssi)).foregroundStyle(.blue.opacity(0.12))
                 }
-                .chartYScale(domain: -95 ... -30).frame(height: 70)
+                .chartYScale(domain: -95 ... -30).chartXAxis(.hidden).frame(height: 70)
                 let lat = w.samples.compactMap(\.latency)
                 HStack {
                     Text("Response time — lower is better").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -530,7 +532,7 @@ struct ContentView: View {
                 }
                 Chart(w.samples.filter { $0.latency != nil }) { s in
                     LineMark(x: .value("t", s.t), y: .value("ms", s.latency ?? 0)).foregroundStyle(.purple)
-                }.frame(height: 70)
+                }.chartXAxis(.hidden).frame(height: 70)
             }
         }
     }
@@ -542,10 +544,10 @@ struct ContentView: View {
         }
     }
 
-    var speedCard: some View {
+    var speedBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Speed test").font(.system(size: 12, weight: .semibold))
+                Text(w.history.isEmpty ? "Measure your real internet speed" : "Last run").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 if w.testing { ProgressView().controlSize(.small); Text("Measuring…").font(.caption) }
                 else { Button("Run") { w.runSpeedTest() }.buttonStyle(Pill()) }
@@ -567,7 +569,6 @@ struct ContentView: View {
                 }
             }
         }
-        .card(12)
     }
 
     var diagBody: some View {
