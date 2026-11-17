@@ -13,7 +13,7 @@ APP=build/Router.app
 if [[ "$MODE" == "release" ]]; then
   : "${IDENTITY:?set IDENTITY in release.local.env}"
   swift build -c release --arch arm64 --arch x86_64
-  BIN=.build/apple/Products/Release/Router
+  BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Router"
 else
   swift build -c release
   BIN=.build/release/Router
