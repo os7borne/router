@@ -4,6 +4,29 @@ import SwiftUI
 import UserNotifications
 import ServiceManagement
 import os
+import Security
+
+/// Passwords the user typed into Router, kept in the login Keychain (macOS's own saved passwords can't be read).
+enum SavedPasswords {
+    private static let service = "local.router.wifi"
+    private static func query(_ ssid: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: ssid]
+    }
+    static func get(_ ssid: String) -> String? {
+        var q = query(ssid); q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
+        return String(data: d, encoding: .utf8)
+    }
+    static func set(_ ssid: String, _ pw: String) {
+        let data = Data(pw.utf8)
+        if SecItemUpdate(query(ssid) as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecItemNotFound {
+            var q = query(ssid); q[kSecValueData as String] = data
+            SecItemAdd(q as CFDictionary, nil)
+        }
+    }
+    static func remove(_ ssid: String) { SecItemDelete(query(ssid) as CFDictionary) }
+}
 
 struct Net: Identifiable, Hashable {
     var id: String { ssid }
@@ -39,6 +62,8 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let loc = CLLocationManager()
     private var timer: Timer?
     private var lastRoam = Date.distantPast
+    private var lastScan = Date.distantPast
+    var menuOpen = false
     private var lastReach = Date.distantPast
     private var checkingReach = false
     private var weakFlag = false
@@ -96,6 +121,30 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
 
+    @Published var memory: [String: SavedNet] = {
+        guard let d = UserDefaults.standard.data(forKey: "netMemory"),
+              let m = try? JSONDecoder().decode([String: SavedNet].self, from: d) else { return [:] }
+        return m
+    }() {
+        didSet { if let d = try? JSONEncoder().encode(memory) { UserDefaults.standard.set(d, forKey: "netMemory") } }
+    }
+    @Published var expiryDays: Int = UserDefaults.standard.object(forKey: "expiryDays") as? Int ?? 7 {
+        didSet { UserDefaults.standard.set(expiryDays, forKey: "expiryDays") }
+    }
+    @Published var alsoForgetInMac: Bool = UserDefaults.standard.bool(forKey: "alsoForgetInMac") {
+        didSet { UserDefaults.standard.set(alsoForgetInMac, forKey: "alsoForgetInMac") }
+    }
+    @Published var warnPublic: Bool = UserDefaults.standard.object(forKey: "warnPublic") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(warnPublic, forKey: "warnPublic") }
+    }
+    @Published var mutedPublic: [String] = UserDefaults.standard.stringArray(forKey: "mutedPublic") ?? [] {
+        didSet { UserDefaults.standard.set(mutedPublic, forKey: "mutedPublic") }
+    }
+    @Published var vpn = VPNState()
+    @Published var lastScanned: Date?
+    private var lastVPNCheck = Date.distantPast
+    private var lastPrune = Date.distantPast
+
     @Published var testing = false
     @Published var history: [SpeedResult] = {
         guard let d = UserDefaults.standard.data(forKey: "history"),
@@ -145,6 +194,7 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     func onOpen() {
+        menuOpen = true
         refresh()
         lastReach = .distantPast
         Task { await scan() }
@@ -200,6 +250,16 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             if Date().timeIntervalSince(lastReach) > 15 && !checkingReach { Task { await checkReach() } }
         }
         recompute()
+        if let s = ssid, powered { touchMemory(s) }
+        if Date().timeIntervalSince(lastPrune) > 3600 { lastPrune = Date(); pruneMemory() }
+        if Date().timeIntervalSince(lastVPNCheck) > (menuOpen ? 10 : 60), Tailscale.installed {
+            lastVPNCheck = Date()
+            Task { let v = await Task.detached { Tailscale.state() }.value; if v != vpn { vpn = v } }
+        }
+        // Keep the network list fresh: often while the menu is open, occasionally otherwise (feeds smart roam).
+        if powered, !scanning, connecting == nil, Date().timeIntervalSince(lastScan) > (menuOpen ? 15 : 60) {
+            Task { await scan() }
+        }
         guard smartRoam, !scanning, connecting == nil, !testing,
               Date().timeIntervalSince(lastRoam) > 60 else { return }
         if ssid == nil || rssi < -75 { Task { await roam() } }
@@ -215,7 +275,24 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         recompute()
     }
 
-    func openLogin() { NSWorkspace.shared.open(URL(string: "http://captive.apple.com")!) }
+    func openLogin() { PortalController.shared.open(wifi: self) }
+    func recheckReach() { if !checkingReach { Task { await checkReach() } } }
+
+    func enableVPN() {
+        Task {
+            let err = await Task.detached { Tailscale.enable() }.value
+            if let err, !err.isEmpty { error = "Couldn't turn on Tailscale: \(err)" }
+            vpn = await Task.detached { Tailscale.state() }.value
+        }
+    }
+    func useExitNode(_ ip: String) {
+        Task {
+            let err = await Task.detached { Tailscale.useExitNode(ip) }.value
+            if let err, !err.isEmpty { error = "Couldn't use the exit node: \(err)" }
+            vpn = await Task.detached { Tailscale.state() }.value
+        }
+    }
+    func muteWarning(_ s: String) { if !mutedPublic.contains(s) { mutedPublic.append(s) } }
 
     private var lastStatus: Status?
     private func recompute() {
@@ -268,12 +345,14 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     func scan() async {
         guard let i = iface, powered, !scanning else { return }
         scanning = true
+        lastScan = Date()
         defer { scanning = false }
         let known = Set(i.configuration()?.networkProfiles.compactMap { ($0 as? CWNetworkProfile)?.ssid } ?? [])
         let found: [CWNetwork] = await Task.detached {
             (try? i.scanForNetworks(withSSID: nil)).map(Array.init) ?? []
         }.value
 
+        lastScanned = Date()
         aps = found.enumerated().map { idx, n in
             AP(id: n.bssid ?? "\(idx)-\(n.ssid ?? "")-\(n.wlanChannel?.channelNumber ?? 0)",
                ssid: (n.ssid?.isEmpty == false ? n.ssid! : "Hidden network"),
@@ -301,6 +380,18 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
 
+    /// Connected network first, then favourites, then strongest signal. Computed so it stays right as state changes between scans.
+    var sortedNetworks: [Net] {
+        networks.sorted {
+            let c0 = $0.ssid == ssid, c1 = $1.ssid == ssid
+            if c0 != c1 { return c0 }
+            let f0 = favorites.contains($0.ssid), f1 = favorites.contains($1.ssid)
+            if f0 != f1 { return f0 }
+            if $0.rssi != $1.rssi { return $0.rssi > $1.rssi }
+            return $0.ssid < $1.ssid
+        }
+    }
+
     func connect(_ n: Net, password: String?) async {
         guard let i = iface else { return }
         connecting = n.ssid; error = nil; needsPassword = nil
@@ -319,7 +410,17 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             do { try i.associate(to: target, password: password); return nil }
             catch let e as NSError { return (e.code, e.localizedDescription) }
         }.value
-        guard let r = result else { log.info("connect \(ssid, privacy: .public): ok"); return }
+        guard let r = result else {
+            log.info("connect \(ssid, privacy: .public): ok")
+            if let password, !password.isEmpty { SavedPasswords.set(ssid, password) }
+            return
+        }
+        // macOS couldn't join on its own: retry once with the password Router saved earlier.
+        if password == nil, !target.supportsSecurity(.none), let saved = SavedPasswords.get(ssid) {
+            await connect(n, password: saved)
+            return
+        }
+        if password != nil { SavedPasswords.remove(ssid) }
         log.error("connect \(ssid, privacy: .public): failed code \(r.code) \(r.text, privacy: .public)")
         if target.supportsSecurity(.none) {
             error = "Couldn't join “\(ssid)” (error \(r.code))."
@@ -346,7 +447,8 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         if let idx = favorites.firstIndex(of: s) { favorites.remove(at: idx) } else { favorites.append(s) }
     }
 
-    func forget(_ s: String) {
+    func forget(_ s: String, keepRouterData: Bool = false) {
+        if !keepRouterData { removeNetwork(s) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
         p.arguments = ["-removepreferredwirelessnetwork", iface?.interfaceName ?? "en0", s]

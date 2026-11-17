@@ -3,9 +3,12 @@ import AppKit
 import Carbon
 import Combine
 import UserNotifications
+import Sparkle
 
 nonisolated(unsafe) var hotkeyAction: (() -> Void)?
 nonisolated(unsafe) var openSettingsAction: (() -> Void)?
+nonisolated(unsafe) var updaterController: SPUStandardUpdaterController?
+nonisolated(unsafe) var checkForUpdatesAction: (() -> Void)?
 nonisolated(unsafe) var openAnalyticsAction: ((Int64?) -> Void)?
 
 @MainActor
@@ -22,6 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var localClick: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        checkForUpdatesAction = { [weak self] in
+            self?.popover.performClose(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            updaterController?.checkForUpdates(nil)
+        }
         UNUserNotificationCenter.current().delegate = self
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
@@ -76,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func popoverDidClose(_ notification: Notification) {
+        wifi.menuOpen = false
         if let g = globalClick { NSEvent.removeMonitor(g); globalClick = nil }
         if let l = localClick { NSEvent.removeMonitor(l); localClick = nil }
     }

@@ -4,6 +4,16 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-17
+- Automatic updates through Sparkle. Check from the gear menu or Settings → Updates.
+- Simpler popup: the status card and network list collapse while the connection is good, and open when it isn't.
+- Signals, Live and Tools are merged into one Diagnostics tab.
+- Use-case ratings: Browsing, Video calls, Streaming, Gaming and Downloads.
+- Save icon on every network. Unsaved networks are forgotten after a set number of days.
+- Public-network warning with Tailscale controls.
+- Sign-in window for captive portals that fills saved details and stops at one-time codes.
+- The list of networks refreshes in the background, with the connected network always on top.
+
 ## [0.1.0] - 2026-11-15
 
 ### Changed

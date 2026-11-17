@@ -15,7 +15,7 @@ A fast, friendly Wi-Fi control for the macOS menubar. Router replaces the clunky
 - **Places.** Optionally tracks time spent at each location (Wi-Fi network plus GPS), with per-place speed history and day/week/month/year/all-time analytics in a detailed window.
 
 ## Download
-Grab the latest `Router-vX.Y.Z.zip` from the [Releases](../../releases) page, unzip, and drag **Router.app** to `/Applications`. Release builds are not notarized, so the first time right-click the app → **Open**.
+Grab the latest `Router.zip` from the [Releases](../../releases) page, unzip, and drag **Router.app** to `/Applications`. Releases are signed and notarized, and Router updates itself after that (gear menu → **Check for Updates…**).
 
 ## Requirements
 - macOS 13 or later
@@ -63,7 +63,10 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code
 [MIT](LICENSE)
 
 ## Releasing
-1. Update the version in `Info.plist` (`CFBundleShortVersionString`, and bump `CFBundleVersion`).
-2. Move the "Unreleased" notes in `CHANGELOG.md` under the new version.
-3. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
-4. The **Release** workflow builds the app and publishes the GitHub Release with the zip attached.
+Releases are built on the maintainer's Mac, because signing and update keys live in its Keychain.
+1. Update the version in `Info.plist` (`CFBundleShortVersionString`, and raise `CFBundleVersion`, which Sparkle compares).
+2. Move the "Unreleased" notes in `CHANGELOG.md` under the new version and write `notes/<version>.md` (shown in the update window).
+3. Commit and push.
+4. `./build.sh release` (Developer ID signed, notarized, stapled; needs `release.local.env`) then `tools/make-appcast.sh`.
+5. `gh release create v<version> dist/Router.zip dist/appcast.xml --title "Router <version>" --notes-file notes/<version>.md`.
+The app reads its update feed from `releases/latest/download/appcast.xml`.

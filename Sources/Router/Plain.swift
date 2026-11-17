@@ -37,16 +37,32 @@ extension WiFiManager {
 
     var online: Bool { status != .loginRequired && status != .noInternet && ssid != nil }
 
+    /// Most recent speed test on this network (last 30 min), if any.
+    var recentDown: Double? {
+        history.first { $0.ssid == ssid && Date().timeIntervalSince($0.date) < 1800 }?.down
+    }
+
+    /// How well everyday things should work right now. Uses a recent speed test when there is one.
     var activities: [Activity] {
         let q = quality.rawValue, lat = avgLatency ?? 0, rate = txRate
+        let lost = samples.suffix(15).filter { $0.latency == nil }.count
+        let down = recentDown
         func lvl(_ good: Bool, _ maybe: Bool) -> Int { !online ? 0 : good ? 2 : maybe ? 1 : 0 }
+        let streamGood = down.map { $0 >= 25 } ?? (rate >= 150)
+        let streamMaybe = down.map { $0 >= 8 } ?? true
+        let loadGood = down.map { $0 >= 100 } ?? (rate >= 300)
+        let loadMaybe = down.map { $0 >= 25 } ?? true
         return [
-            Activity(name: "Calls", symbol: "video.fill", level: lvl(q >= 3 && lat < 100, q >= 2)),
-            Activity(name: "Streaming", symbol: "play.rectangle.fill", level: lvl(q >= 3 && rate >= 150, q >= 2)),
-            Activity(name: "Gaming", symbol: "gamecontroller.fill", level: lvl(q >= 3 && lat < 50, q >= 2 && lat < 100)),
-            Activity(name: "Downloads", symbol: "arrow.down.circle.fill", level: lvl(q >= 3 && rate >= 300, q >= 2)),
+            Activity(name: "Browsing", symbol: "safari.fill", level: lvl(q >= 2 && lost <= 1 && (down ?? 10) >= 3, q >= 1)),
+            Activity(name: "Video calls", symbol: "video.fill", level: lvl(q >= 3 && lat < 100 && lost <= 1, q >= 2 && lost <= 3)),
+            Activity(name: "Streaming", symbol: "play.rectangle.fill", level: lvl(q >= 3 && streamGood, q >= 2 && streamMaybe)),
+            Activity(name: "Gaming", symbol: "gamecontroller.fill", level: lvl(q >= 3 && lat < 50 && lost == 0, q >= 2 && lat < 100)),
+            Activity(name: "Downloads", symbol: "arrow.down.circle.fill", level: lvl(q >= 3 && loadGood, q >= 2 && loadMaybe)),
         ]
     }
+
+    /// Everything fine: the status card can stay collapsed.
+    var healthy: Bool { (status == .connected || status == .hotspot) && quality.rawValue >= 3 && online }
 
     var headline: (text: String, color: Color) {
         switch status {
@@ -69,7 +85,7 @@ extension WiFiManager {
             case .excellent: return "Everything should run smoothly."
             case .good: return "Fine for most things."
             case .fair: return "Fine for browsing. Video calls may stutter."
-            case .poor: return "Move closer to the router, or switch to a stronger network."
+            case .poor: return "Calls and gaming may struggle here. Move closer, or switch to a stronger network."
             case .none: return ""
             }
         }

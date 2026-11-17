@@ -7,3 +7,8 @@ DerivedData/
 .DS_Store
 *.iconset/
 *.icns
+release.local.env
+dist/
+*.p8
+*.zip
+appcast.xml

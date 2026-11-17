@@ -23,6 +23,12 @@ struct SettingsView: View {
                 .toggle("Smart auto-connect", "Switch to a starred network when your signal gets weak", $w.smartRoam),
                 .toggle("Check for login pages", "Spot café and hotel sign-in pages and offer a Sign in button", $w.checkLogin),
             ])
+            group("Network memory", [
+                .expiry,
+                .toggle("Also forget in macOS", "Remove expired networks from System Settings too", $w.alsoForgetInMac),
+                .toggle("Warn on public networks", "Suggest a VPN (Tailscale) on open or sign-in networks", $w.warnPublic),
+                .memoryList,
+            ])
             group("Alerts", [
                 .toggle("Notifications", "Tell me when I connect, disconnect, or something goes wrong", $w.notify),
                 .toggle("Sound", "Play a sound with alerts", $w.sound),
@@ -42,6 +48,7 @@ struct SettingsView: View {
                         Binding(get: { w.launchAtLogin }, set: { w.launchAtLogin = $0 })),
                 .keys("Global shortcut", "Open Router from anywhere", "⌃ ⌥ W"),
             ])
+            group("Updates", [.updates])
             group("About", [.feedback])
             CreditLine().frame(maxWidth: .infinity)
             if let e = w.error { Text(e).font(.caption).foregroundStyle(.red) }
@@ -50,7 +57,7 @@ struct SettingsView: View {
         .frame(width: 500, alignment: .leading)
     }
 
-    enum Item { case toggle(String, String, Binding<Bool>); case keys(String, String, String); case radius; case wipe; case location; case feedback }
+    enum Item { case toggle(String, String, Binding<Bool>); case keys(String, String, String); case radius; case updates; case expiry; case memoryList; case wipe; case location; case feedback }
 
     func group(_ title: String, _ items: [Item]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -79,6 +86,27 @@ struct SettingsView: View {
                 label("Place size", "Spots closer than this count as the same place (\(Int(w.tracker.radius)) m)")
                 Slider(value: Binding(get: { w.tracker.radius }, set: { w.tracker.radius = $0 }), in: 50...500, step: 25).frame(width: 130)
             }.padding(.horizontal, 14).padding(.vertical, 11)
+        case .updates:
+            HStack(spacing: 14) {
+                label("Keep Router up to date", "Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""). Router checks for new versions in the background.")
+                Toggle("", isOn: Binding(get: { updaterController?.updater.automaticallyChecksForUpdates ?? true },
+                                         set: { updaterController?.updater.automaticallyChecksForUpdates = $0; w.objectWillChange.send() }))
+                    .toggleStyle(.switch).labelsHidden().tint(Theme.good)
+                Button("Check now") { checkForUpdatesAction?() }.buttonStyle(Pill())
+            }.padding(.horizontal, 14).padding(.vertical, 11)
+        case .expiry:
+            HStack(spacing: 14) {
+                label("Forget unsaved networks after", "Counted from the last time you joined. Saved networks are never forgotten.")
+                Picker("", selection: $w.expiryDays) {
+                    Text("1 day").tag(1); Text("3 days").tag(3); Text("7 days").tag(7); Text("30 days").tag(30)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
+            }.padding(.horizontal, 14).padding(.vertical, 11)
+        case .memoryList:
+            VStack(alignment: .leading, spacing: 10) {
+                memorySection("Saved", w.savedNetworks, saved: true)
+                memorySection("Not saved", w.unsavedNetworks, saved: false)
+                if w.memory.isEmpty { Text("Networks you join will show up here.").font(.system(size: 11)).foregroundStyle(.secondary) }
+            }.padding(.horizontal, 14).padding(.vertical, 11).frame(maxWidth: .infinity, alignment: .leading)
         case .location:
             HStack(spacing: 14) {
                 label("Location access", w.locationAllowed
@@ -113,6 +141,31 @@ struct SettingsView: View {
                     .padding(.horizontal, 10).padding(.vertical, 5)
                     .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }.padding(.horizontal, 14).padding(.vertical, 11)
+        }
+    }
+
+    @ViewBuilder func memorySection(_ title: String, _ list: [SavedNet], saved: Bool) -> some View {
+        if !list.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    FloppyIcon(filled: saved, color: saved ? Theme.accent : .secondary).frame(width: 11, height: 11)
+                    Text("\(title) · \(list.count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                ForEach(list, id: \.ssid) { n in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(n.ssid).font(.system(size: 12, weight: .medium))
+                            Text(saved ? "Last joined \(n.lastJoined.formatted(.relative(presentation: .named)))"
+                                 : { let d = w.daysLeft(n.ssid) ?? 0; return d == 0 ? "Forgets today" : "Forgets in \(d) day\(d == 1 ? "" : "s")" }())
+                                .font(.system(size: 10)).foregroundStyle(saved ? Color.secondary : Theme.warn)
+                        }
+                        Spacer()
+                        if !saved { Button("Keep") { w.setSaved(n.ssid, true) }.buttonStyle(.link).font(.system(size: 11)) }
+                        Button { w.removeNetwork(n.ssid); if w.alsoForgetInMac { w.forget(n.ssid, keepRouterData: true) } } label: { Image(systemName: "trash").font(.system(size: 11)) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).help("Remove Router's saved password and details")
+                    }
+                }
+            }
         }
     }
 
