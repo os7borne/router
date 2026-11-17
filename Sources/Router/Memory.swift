@@ -89,6 +89,6 @@ extension WiFiManager {
         guard let s = ssid, !isHotspot else { return false }
         if status == .loginRequired { return true }
         if let n = networks.first(where: { $0.ssid == s }) { return !n.secure }
-        return false
+        return openSSIDs.contains(s)   // before the first scan finishes, use what the last scan found
     }
 }

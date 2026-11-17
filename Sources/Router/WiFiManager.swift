@@ -141,6 +141,8 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         didSet { UserDefaults.standard.set(mutedPublic, forKey: "mutedPublic") }
     }
     @Published var vpn = VPNState()
+    /// Networks a scan has found open (no password). Remembered so the public-network warning is right the moment the app starts.
+    var openSSIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "openSSIDs") ?? [])
     @Published var lastScanned: Date?
     private var lastVPNCheck = Date.distantPast
     private var lastPrune = Date.distantPast
@@ -353,6 +355,10 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }.value
 
         lastScanned = Date()
+        defer {
+            let open = Set(networks.filter { !$0.secure }.map(\.ssid))
+            if !networks.isEmpty, open != openSSIDs { openSSIDs = open; UserDefaults.standard.set(Array(open), forKey: "openSSIDs") }
+        }
         aps = found.enumerated().map { idx, n in
             AP(id: n.bssid ?? "\(idx)-\(n.ssid ?? "")-\(n.wlanChannel?.channelNumber ?? 0)",
                ssid: (n.ssid?.isEmpty == false ? n.ssid! : "Hidden network"),
