@@ -92,6 +92,8 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var diag: [DiagStep] = []
     @Published var diagVerdict = ""
     @Published var diagRunning = false
+    @Published var nativePortalOff = WiFiManager.readNativePortalOff()
+    @Published var portalSwitchBusy = false
 
     @Published var favorites: [String] = UserDefaults.standard.stringArray(forKey: "favorites") ?? [] {
         didSet { UserDefaults.standard.set(favorites, forKey: "favorites") }
@@ -311,6 +313,8 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         lastStatus = status
         status = s
         if !first { notifyChange(s) }
+        // With macOS's own sign-in window turned off, Router's takes its place.
+        if s == .loginRequired, nativePortalOff { DispatchQueue.main.async { [weak self] in self?.openLogin() } }
     }
 
     private func notifyChange(_ s: Status) {

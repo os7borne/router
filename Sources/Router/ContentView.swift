@@ -300,6 +300,7 @@ struct ContentView: View {
                 Toggle("Notifications", isOn: $w.notify)
                 if w.ssid != nil { Button("Disconnect") { w.disconnect() } }
                 Button("Check for Updates…") { checkForUpdatesAction?() }
+                Button("Test sign-in window") { w.openLogin() }
                 Button("Wi-Fi Settings…") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension")!)
                 }

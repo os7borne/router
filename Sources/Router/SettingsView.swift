@@ -22,6 +22,7 @@ struct SettingsView: View {
             group("Connection", [
                 .toggle("Smart auto-connect", "Switch to a starred network when your signal gets weak", $w.smartRoam),
                 .toggle("Check for login pages", "Spot café and hotel sign-in pages and offer a Sign in button", $w.checkLogin),
+                .nativePortal,
             ])
             group("Network memory", [
                 .expiry,
@@ -57,7 +58,7 @@ struct SettingsView: View {
         .frame(width: 500, alignment: .leading)
     }
 
-    enum Item { case toggle(String, String, Binding<Bool>); case keys(String, String, String); case radius; case updates; case expiry; case memoryList; case wipe; case location; case feedback }
+    enum Item { case toggle(String, String, Binding<Bool>); case keys(String, String, String); case radius; case updates; case expiry; case nativePortal; case memoryList; case wipe; case location; case feedback }
 
     func group(_ title: String, _ items: [Item]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -93,6 +94,14 @@ struct SettingsView: View {
                                          set: { updaterController?.updater.automaticallyChecksForUpdates = $0; w.objectWillChange.send() }))
                     .toggleStyle(.switch).labelsHidden().tint(Theme.good)
                 Button("Check now") { checkForUpdatesAction?() }.buttonStyle(Pill())
+            }.padding(.horizontal, 14).padding(.vertical, 11)
+        case .nativePortal:
+            HStack(spacing: 14) {
+                label("Use Router's sign-in window", w.nativePortalOff
+                      ? "On. macOS's own sign-in window is turned off for every app on this Mac, so Router opens its window instead. Router has to be running."
+                      : "Replace the macOS sign-in window with Router's, which can fill in your details. Asks for your Mac password once.")
+                Toggle("", isOn: Binding(get: { w.nativePortalOff }, set: { w.setNativePortalOff($0) }))
+                    .toggleStyle(.switch).labelsHidden().tint(Theme.good).disabled(w.portalSwitchBusy)
             }.padding(.horizontal, 14).padding(.vertical, 11)
         case .expiry:
             HStack(spacing: 14) {
