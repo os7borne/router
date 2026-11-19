@@ -4,6 +4,11 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-19
+- Optional switch (Settings → Connection) to replace the macOS sign-in window with Router's own, which opens automatically and can fill in saved details.
+- The public-network warning shows right after launch, using the networks the last scan found open.
+- New "Test sign-in window" item in the gear menu.
+
 ## [0.2.1] - 2026-11-17
 - The public-network warning is now one slim row, with a single button that fits the current Tailscale state.
 - Diagnostics sections work as an accordion: one open at a time, with short summaries when collapsed.
