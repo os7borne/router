@@ -4,6 +4,7 @@ import SwiftUI
 import UserNotifications
 import ServiceManagement
 import os
+import Network
 import Security
 
 /// Passwords the user typed into Router, kept in the login Keychain (macOS's own saved passwords can't be read).
@@ -68,6 +69,9 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var checkingReach = false
     private var weakFlag = false
     private var prevSSID: String?
+    private var pathMonitor: NWPathMonitor?
+    /// Where the portal redirected the last probe, so the sign-in window can load it directly.
+    var portalURL: URL?
     private var started = false
 
     @Published var powered = true
@@ -167,6 +171,15 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             Task { @MainActor in self?.tick() }
         }
         Task { await scan() }
+        // Probe for a portal the moment the network path changes, instead of waiting for the next tick.
+        let m = NWPathMonitor(requiredInterfaceType: .wifi)
+        m.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in self?.refresh(); self?.recheckReach() }
+        }
+        m.start(queue: DispatchQueue(label: "router.path"))
+        pathMonitor = m
+        PortalController.shared.prepare(wifi: self)
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -214,7 +227,12 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         txRate = i.transmitRate()
         if let c = i.wlanChannel() { channelNum = c.channelNumber; bandName = Self.band(c) }
         else { channelNum = 0; bandName = "" }
-        if ssid != prevSSID { prevSSID = ssid; reach = .unknown; gateway = nil; lastReach = .distantPast; weakFlag = false }
+        if ssid != prevSSID {
+            prevSSID = ssid; reach = .unknown; gateway = nil; lastReach = .distantPast; weakFlag = false
+            // A failed join of some other network is stale once we're somewhere else.
+            if connecting == nil { error = nil; needsPassword = nil }
+            if ssid != nil { recheckReach() }
+        }
         recompute()
     }
 
@@ -271,9 +289,12 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func checkReach() async {
         checkingReach = true; defer { checkingReach = false }
-        gateway = await Task.detached { Shell.gateway() }.value
-        var r = await Task.detached { Shell.captive() }.value
+        async let gw = Task.detached { Shell.gateway() }.value
+        let probe = await Task.detached { Shell.captive() }.value
+        var r = probe.reach
         if r == .login && !checkLogin { r = .ok }
+        portalURL = r == .login ? probe.url : nil
+        gateway = await gw
         reach = r
         lastReach = Date()
         recompute()
@@ -343,7 +364,7 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         let candidates = networks.filter { favorites.contains($0.ssid) && $0.ssid != ssid && $0.known }
         if let best = candidates.max(by: { $0.rssi < $1.rssi }),
            ssid == nil || best.rssi > current + 10 {
-            await connect(best, password: nil)
+            await connect(best, password: nil, silent: true)
         }
     }
 
@@ -402,7 +423,7 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
 
-    func connect(_ n: Net, password: String?) async {
+    func connect(_ n: Net, password: String?, silent: Bool = false) async {
         guard let i = iface else { return }
         connecting = n.ssid; error = nil; needsPassword = nil
         defer { connecting = nil; refresh() }
@@ -413,7 +434,7 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }.value
         guard let target = fresh else {
             log.error("connect \(ssid, privacy: .public): not visible in scan")
-            error = "Can't see “\(ssid)” right now. Is it in range, and is the hotspot or router on?"
+            if !silent { error = "Can't see “\(ssid)” right now. Is it in range, and is the hotspot or router on?" }
             return
         }
         let result: (code: Int, text: String)? = await Task.detached {
@@ -427,11 +448,12 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         // macOS couldn't join on its own: retry once with the password Router saved earlier.
         if password == nil, !target.supportsSecurity(.none), let saved = SavedPasswords.get(ssid) {
-            await connect(n, password: saved)
+            await connect(n, password: saved, silent: silent)
             return
         }
         if password != nil { SavedPasswords.remove(ssid) }
         log.error("connect \(ssid, privacy: .public): failed code \(r.code) \(r.text, privacy: .public)")
+        if silent { return }   // automatic roam attempts never surface errors
         if target.supportsSecurity(.none) {
             error = "Couldn't join “\(ssid)” (error \(r.code))."
         } else if password == nil {
@@ -532,7 +554,7 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                 else { set(3, .ok, String(format: "%.0f ms", p.avg ?? 0)) }
                 // 4 captive
                 set(4, .running, "")
-                let r = await Task.detached { Shell.captive() }.value
+                let r = await Task.detached { Shell.captive().reach }.value
                 reach = r; lastReach = Date(); recompute()
                 switch r {
                 case .ok: set(4, .ok, "Open internet")

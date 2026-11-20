@@ -28,23 +28,41 @@ final class PortalController: NSObject, ObservableObject, WKNavigationDelegate, 
         web.navigationDelegate = self
     }
 
+    /// Builds the window and starts the web content process at launch so opening is instant.
+    func prepare(wifi: WiFiManager) {
+        self.wifi = wifi
+        _ = makeWindow(wifi)
+        web.loadHTMLString("", baseURL: nil)   // spins up the WebContent process
+    }
+
+    private func makeWindow(_ wifi: WiFiManager) -> NSWindow {
+        if let w = window { return w }
+        let w = NSPanel(contentViewController: NSHostingController(rootView: PortalView(c: self).environmentObject(wifi)))
+        w.title = "Sign in"
+        w.styleMask = [.titled, .closable, .resizable, .utilityWindow]
+        w.setContentSize(NSSize(width: 460, height: 680))
+        w.isReleasedWhenClosed = false
+        // Like macOS's own sign-in window: above other apps' windows, on every Space, even over full screen.
+        w.level = .floating
+        w.isFloatingPanel = true
+        w.hidesOnDeactivate = false
+        w.becomesKeyOnlyIfNeeded = false
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window = w
+        return w
+    }
+
     func open(wifi: WiFiManager) {
         self.wifi = wifi
         ssid = wifi.ssid ?? ""
         step = .filling; filledCount = 0
-        if window == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: PortalView(c: self).environmentObject(wifi)))
-            w.title = "Sign in"
-            w.styleMask = [.titled, .closable, .resizable]
-            w.setContentSize(NSSize(width: 460, height: 680))
-            w.isReleasedWhenClosed = false
-            window = w
-        }
-        window?.title = ssid.isEmpty ? "Sign in" : "\(ssid) · Sign in"
-        web.load(URLRequest(url: URL(string: "http://captive.apple.com")!))
-        window?.center()
+        let w = makeWindow(wifi)
+        w.title = ssid.isEmpty ? "Sign in" : "\(ssid) · Sign in"
+        web.load(URLRequest(url: wifi.portalURL ?? URL(string: "http://captive.apple.com")!))
+        if !w.isVisible { w.center() }
         NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
         startPolling()
     }
 

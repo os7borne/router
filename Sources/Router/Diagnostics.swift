@@ -48,10 +48,15 @@ enum Shell {
     }
 
     enum Reach { case unknown, ok, login, offline }
-    static func captive() -> Reach {
-        let r = run("/usr/bin/curl", ["-s", "-m", "5", "http://captive.apple.com/hotspot-detect.html"])
-        if r.code != 0 { return .offline }
-        return r.out.contains("Success") ? .ok : .login
+    static func captive() -> (reach: Reach, url: URL?) {
+        // No -L: a portal's redirect target is what the sign-in window should load directly.
+        let r = run("/usr/bin/curl", ["-s", "--connect-timeout", "2", "-m", "4", "-w", "\n__REDIR__%{redirect_url}",
+                                      "http://captive.apple.com/hotspot-detect.html"])
+        if r.code != 0 { return (.offline, nil) }
+        let parts = r.out.components(separatedBy: "\n__REDIR__")
+        if parts[0].contains("Success") { return (.ok, nil) }
+        let loc = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return (.login, loc.isEmpty ? nil : URL(string: loc))
     }
 
     static func latencyOnce() -> Double? {
