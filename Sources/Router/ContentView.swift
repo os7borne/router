@@ -372,7 +372,6 @@ struct ContentView: View {
     func row(_ n: Net) -> some View {
         let isCurrent = n.ssid == w.ssid
         let fav = w.favorites.contains(n.ssid)
-        let saved = w.isSaved(n.ssid)
         return VStack(spacing: 4) {
             HStack(spacing: 10) {
                 Button { w.toggleFavorite(n.ssid) } label: {
@@ -388,10 +387,6 @@ struct ContentView: View {
                 if w.connecting == n.ssid { ProgressView().controlSize(.small) }
                 if n.secure { Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(.secondary) }
                 else { Image(systemName: "exclamationmark.shield").font(.system(size: 11)).foregroundStyle(Theme.warn).help("Public network") }
-                Button { w.toggleSaved(n.ssid) } label: {
-                    FloppyIcon(filled: saved, color: saved ? Theme.accent : Color.secondary.opacity(0.8)).frame(width: 13, height: 13)
-                }.buttonStyle(.plain)
-                    .help(saved ? "Saved. Click to forget it after \(w.expiryDays) days of not using it" : "Not saved. Click to keep it until you remove it")
                 if isCurrent { Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.accent) }
                 SignalBars(rssi: n.rssi)
             }
@@ -403,19 +398,15 @@ struct ContentView: View {
                 if n.secure && !n.known { pwFor = n.ssid; pw = "" }
                 else { Task { await w.connect(n, password: nil) } }
             }
-            .contextMenu { if n.known || saved { Button("Forget Network") { w.forget(n.ssid) } } }
+            .contextMenu { if n.known || w.memory[n.ssid] != nil { Button("Forget Network") { w.forget(n.ssid) } } }
             if pwFor == n.ssid || w.needsPassword == n.ssid {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         SecureField("Password", text: $pw).textFieldStyle(.roundedBorder).onSubmit { submit(n) }
                         Button("Join") { submit(n) }.buttonStyle(Pill(fill: Theme.accent, fg: .black)).disabled(pw.isEmpty)
                     }
-                    HStack(spacing: 5) {
-                        FloppyIcon(filled: saved, color: saved ? Theme.accent : .secondary).frame(width: 11, height: 11)
-                        Text(saved ? "Saved in your Keychain. Tap the icon to forget it after \(w.expiryDays) days instead."
-                                   : "Forgotten after \(w.expiryDays) days. Tap the icon to keep it.")
-                            .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    Text("Router keeps it in your Keychain and forgets it after \(w.expiryDays) days of not joining.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 }.padding(.horizontal, 10).padding(.bottom, 4)
             }
         }
@@ -425,8 +416,7 @@ struct ContentView: View {
         var parts: [String] = []
         if current { parts.append("Connected") }
         else if w.favorites.contains(n.ssid) { parts.append("Favorite") }
-        else if w.isSaved(n.ssid) { parts.append("Saved") }
-        else if let d = w.daysLeft(n.ssid) { parts.append(d == 0 ? "Forgets today" : "Forgets in \(d)d") }
+        else if let d = w.daysLeft(n.ssid), d <= 30 { parts.append(d == 0 ? "Forgets today" : "Forgets in \(d)d") }
         else if n.known { parts.append("Known") }
         parts.append(WiFiManager.quality(rssi: n.rssi).word)
         parts.append(n.band)

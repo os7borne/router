@@ -4,6 +4,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-20
+- The sign-in window now opens right away: it is prepared at launch, loads the portal's own page, and Router checks for a portal as soon as the Wi-Fi network changes.
+- The sign-in window stays on top of other windows and on every Space, like the macOS one.
+- An old "Can't see …" or join error no longer lingers after you switch networks, and automatic roaming no longer shows errors.
+- Every network you join is remembered automatically; the Save button is gone. Networks are forgotten after a year (adjustable) without joining. Starred networks are never forgotten.
+
 ## [0.2.2] - 2026-11-19
 - Optional switch (Settings → Connection) to replace the macOS sign-in window with Router's own, which opens automatically and can fill in saved details.
 - The public-network warning shows right after launch, using the networks the last scan found open.

@@ -235,12 +235,6 @@ struct PortalView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 14) {
-                Button { w.toggleSaved(w.ssid ?? "") } label: {
-                    HStack(spacing: 5) {
-                        FloppyIcon(filled: w.isSaved(w.ssid ?? ""), color: w.isSaved(w.ssid ?? "") ? Theme.accent : .secondary).frame(width: 13, height: 13)
-                        Text(w.isSaved(w.ssid ?? "") ? "Network saved" : "Save network").font(.system(size: 11))
-                    }
-                }.buttonStyle(.plain)
                 Toggle("Save these details", isOn: $c.saveDetails).toggleStyle(.checkbox).font(.system(size: 11))
                 Spacer()
                 if c.hasSavedDetails { Button("Forget details") { c.forgetDetails() }.buttonStyle(.link).font(.system(size: 11)) }
@@ -256,27 +250,3 @@ struct PortalWeb: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
-/// The save icon: a floppy disk, outlined when not saved and filled when saved.
-struct FloppyIcon: View {
-    var filled: Bool
-    var color: Color
-    var body: some View {
-        Canvas { ctx, size in
-            let s = min(size.width, size.height) / 24
-            var outer = Path()
-            outer.move(to: CGPoint(x: 5, y: 3)); outer.addLine(to: CGPoint(x: 16, y: 3)); outer.addLine(to: CGPoint(x: 20, y: 7))
-            outer.addLine(to: CGPoint(x: 20, y: 19)); outer.addQuadCurve(to: CGPoint(x: 18, y: 21), control: CGPoint(x: 20, y: 21))
-            outer.addLine(to: CGPoint(x: 5, y: 21)); outer.addQuadCurve(to: CGPoint(x: 3, y: 19), control: CGPoint(x: 3, y: 21))
-            outer.addLine(to: CGPoint(x: 3, y: 5)); outer.addQuadCurve(to: CGPoint(x: 5, y: 3), control: CGPoint(x: 3, y: 3))
-            outer.closeSubpath()
-            var inner = Path()
-            inner.move(to: CGPoint(x: 7, y: 3)); inner.addLine(to: CGPoint(x: 7, y: 8)); inner.addLine(to: CGPoint(x: 15, y: 8)); inner.addLine(to: CGPoint(x: 15, y: 3))
-            inner.move(to: CGPoint(x: 7, y: 21)); inner.addLine(to: CGPoint(x: 7, y: 14)); inner.addLine(to: CGPoint(x: 17, y: 14)); inner.addLine(to: CGPoint(x: 17, y: 21))
-            let t = CGAffineTransform(scaleX: s, y: s)
-            let style = StrokeStyle(lineWidth: 2 * s, lineCap: .round, lineJoin: .round)
-            if filled { ctx.fill(outer.applying(t), with: .color(color)) }
-            ctx.stroke(outer.applying(t), with: .color(color), style: style)
-            ctx.stroke(inner.applying(t), with: .color(filled ? Color(nsColor: .windowBackgroundColor) : color), style: style)
-        }
-    }
-}

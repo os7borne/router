@@ -1,11 +1,12 @@
 import Foundation
 import Security
 
-/// One network Router has seen you join. `saved` networks are kept until you remove them;
-/// the rest are forgotten after `expiryDays` without joining.
+/// One network Router has seen you join. Every network is remembered; one is forgotten after
+/// `expiryDays` without joining (starred networks are never forgotten). `saved` is a leftover from
+/// the old manual Save button; it's only read so older data still loads.
 struct SavedNet: Codable {
     var ssid: String
-    var saved: Bool
+    var saved: Bool = false
     var lastJoined: Date
 }
 
@@ -37,36 +38,28 @@ enum PortalStore {
 }
 
 extension WiFiManager {
-    func isSaved(_ ssid: String) -> Bool { memory[ssid]?.saved ?? false }
-
-    func setSaved(_ ssid: String, _ saved: Bool) {
-        var m = memory[ssid] ?? SavedNet(ssid: ssid, saved: saved, lastJoined: Date())
-        m.saved = saved
-        memory[ssid] = m
-    }
-
-    func toggleSaved(_ ssid: String) { setSaved(ssid, !isSaved(ssid)) }
-
-    /// Days until an unsaved network is forgotten, or nil if it's saved / unknown to Router.
+    /// Days until a network is forgotten, or nil if it's starred or unknown to Router.
     func daysLeft(_ ssid: String) -> Int? {
-        guard let m = memory[ssid], !m.saved else { return nil }
+        guard let m = memory[ssid], !favorites.contains(ssid) else { return nil }
         let used = Date().timeIntervalSince(m.lastJoined) / 86_400
         return max(0, Int((Double(expiryDays) - used).rounded(.up)))
     }
 
     /// Record that we're on this network right now (resets its expiry clock).
     func touchMemory(_ ssid: String) {
-        var m = memory[ssid] ?? SavedNet(ssid: ssid, saved: false, lastJoined: Date())
+        var m = memory[ssid] ?? SavedNet(ssid: ssid, lastJoined: Date())
         // Update at most once a minute so we don't rewrite defaults on every tick.
         guard memory[ssid] == nil || Date().timeIntervalSince(m.lastJoined) > 60 else { return }
         m.lastJoined = Date()
         memory[ssid] = m
     }
 
-    /// Delete Router-held data for unsaved networks that have gone unused too long.
+    /// Delete Router-held data for networks that have gone unused too long. Starred networks are kept.
+    /// Waits until we're on a network, so a long gap with Router closed can't expire everything at launch.
     func pruneMemory() {
+        guard ssid != nil else { return }
         let cutoff = Date().addingTimeInterval(-Double(expiryDays) * 86_400)
-        for (ssid, m) in memory where !m.saved && m.lastJoined < cutoff && ssid != self.ssid {
+        for (ssid, m) in memory where m.lastJoined < cutoff && ssid != self.ssid && !favorites.contains(ssid) {
             SavedPasswords.remove(ssid)
             PortalStore.remove(ssid)
             if alsoForgetInMac { forget(ssid, keepRouterData: true) }
@@ -81,8 +74,7 @@ extension WiFiManager {
         memory[ssid] = nil
     }
 
-    var savedNetworks: [SavedNet] { memory.values.filter(\.saved).sorted { $0.ssid < $1.ssid } }
-    var unsavedNetworks: [SavedNet] { memory.values.filter { !$0.saved }.sorted { $0.lastJoined > $1.lastJoined } }
+    var rememberedNetworks: [SavedNet] { memory.values.sorted { $0.lastJoined > $1.lastJoined } }
 
     /// An open network, or one behind a sign-in page, that isn't a personal hotspot.
     var onPublicNetwork: Bool {

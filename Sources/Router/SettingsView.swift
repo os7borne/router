@@ -105,15 +105,14 @@ struct SettingsView: View {
             }.padding(.horizontal, 14).padding(.vertical, 11)
         case .expiry:
             HStack(spacing: 14) {
-                label("Forget unsaved networks after", "Counted from the last time you joined. Saved networks are never forgotten.")
+                label("Forget networks after", "Counted from the last time you joined. Starred networks are never forgotten.")
                 Picker("", selection: $w.expiryDays) {
-                    Text("1 day").tag(1); Text("3 days").tag(3); Text("7 days").tag(7); Text("30 days").tag(30)
+                    Text("30 days").tag(30); Text("90 days").tag(90); Text("1 year").tag(365); Text("2 years").tag(730)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
             }.padding(.horizontal, 14).padding(.vertical, 11)
         case .memoryList:
             VStack(alignment: .leading, spacing: 10) {
-                memorySection("Saved", w.savedNetworks, saved: true)
-                memorySection("Not saved", w.unsavedNetworks, saved: false)
+                memorySection("Remembered", w.rememberedNetworks)
                 if w.memory.isEmpty { Text("Networks you join will show up here.").font(.system(size: 11)).foregroundStyle(.secondary) }
             }.padding(.horizontal, 14).padding(.vertical, 11).frame(maxWidth: .infinity, alignment: .leading)
         case .location:
@@ -153,23 +152,18 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder func memorySection(_ title: String, _ list: [SavedNet], saved: Bool) -> some View {
+    @ViewBuilder func memorySection(_ title: String, _ list: [SavedNet]) -> some View {
         if !list.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    FloppyIcon(filled: saved, color: saved ? Theme.accent : .secondary).frame(width: 11, height: 11)
-                    Text("\(title) · \(list.count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                }
+                Text("\(title) · \(list.count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                 ForEach(list, id: \.ssid) { n in
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(n.ssid).font(.system(size: 12, weight: .medium))
-                            Text(saved ? "Last joined \(n.lastJoined.formatted(.relative(presentation: .named)))"
-                                 : { let d = w.daysLeft(n.ssid) ?? 0; return d == 0 ? "Forgets today" : "Forgets in \(d) day\(d == 1 ? "" : "s")" }())
-                                .font(.system(size: 10)).foregroundStyle(saved ? Color.secondary : Theme.warn)
+                            Text("Last joined \(n.lastJoined.formatted(.relative(presentation: .named)))" + (w.favorites.contains(n.ssid) ? " · Starred, never forgotten" : ""))
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if !saved { Button("Keep") { w.setSaved(n.ssid, true) }.buttonStyle(.link).font(.system(size: 11)) }
                         Button { w.removeNetwork(n.ssid); if w.alsoForgetInMac { w.forget(n.ssid, keepRouterData: true) } } label: { Image(systemName: "trash").font(.system(size: 11)) }
                             .buttonStyle(.plain).foregroundStyle(.secondary).help("Remove Router's saved password and details")
                     }

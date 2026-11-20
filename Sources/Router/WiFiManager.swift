@@ -129,13 +129,15 @@ final class WiFiManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     @Published var memory: [String: SavedNet] = {
         guard let d = UserDefaults.standard.data(forKey: "netMemory"),
-              let m = try? JSONDecoder().decode([String: SavedNet].self, from: d) else { return [:] }
+              var m = try? JSONDecoder().decode([String: SavedNet].self, from: d) else { return [:] }
+        // The manual Save button is gone: networks saved before get a fresh expiry clock instead.
+        for (k, v) in m where v.saved { m[k] = SavedNet(ssid: v.ssid, lastJoined: Date()) }
         return m
     }() {
         didSet { if let d = try? JSONEncoder().encode(memory) { UserDefaults.standard.set(d, forKey: "netMemory") } }
     }
-    @Published var expiryDays: Int = UserDefaults.standard.object(forKey: "expiryDays") as? Int ?? 7 {
-        didSet { UserDefaults.standard.set(expiryDays, forKey: "expiryDays") }
+    @Published var expiryDays: Int = UserDefaults.standard.object(forKey: "expiryDaysV2") as? Int ?? 365 {
+        didSet { UserDefaults.standard.set(expiryDays, forKey: "expiryDaysV2") }
     }
     @Published var alsoForgetInMac: Bool = UserDefaults.standard.bool(forKey: "alsoForgetInMac") {
         didSet { UserDefaults.standard.set(alsoForgetInMac, forKey: "alsoForgetInMac") }
