@@ -46,6 +46,7 @@ open build/Router.app
 | `SettingsView.swift` | Settings window, fixed 500×560 inside a `ScrollView` |
 | `Store.swift` | SQLite wrapper (tables `places`, `sessions`, `samples`; WAL) |
 | `PlaceTracker.swift` | Places engine: sessions, place matching, geocoding, reports/analytics queries |
+| `PasswordEntry.swift` | Inline Wi-Fi password field with lock icon, show/hide eye, clear button, focus ring, error state and Join button |
 | `PlacesView.swift` | Compact Places tab in the popover |
 | `AnalyticsView.swift` | Detailed Analytics window (KPIs, stacked time chart, weekday×hour heatmap, download-by-place chart, sortable places table, place detail card, sessions log) |
 

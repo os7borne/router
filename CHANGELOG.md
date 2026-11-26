@@ -4,6 +4,9 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-26
+- New password field when joining a network: lock icon, a show/hide eye button, a clear button, a focus ring, and a red outline when the last password didn't work. It is focused as soon as it opens.
+
 ## [0.2.3] - 2026-11-20
 - The sign-in window now opens right away: it is prepared at launch, loads the portal's own page, and Router checks for a portal as soon as the Wi-Fi network changes.
 - The sign-in window stays on top of other windows and on every Space, like the macOS one.

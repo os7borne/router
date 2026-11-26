@@ -401,10 +401,7 @@ struct ContentView: View {
             .contextMenu { if n.known || w.memory[n.ssid] != nil { Button("Forget Network") { w.forget(n.ssid) } } }
             if pwFor == n.ssid || w.needsPassword == n.ssid {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        SecureField("Password", text: $pw).textFieldStyle(.roundedBorder).onSubmit { submit(n) }
-                        Button("Join") { submit(n) }.buttonStyle(Pill(fill: Theme.accent, fg: .black)).disabled(pw.isEmpty)
-                    }
+                    PasswordEntry(text: $pw, failed: w.needsPassword == n.ssid) { submit(n) }
                     Text("Router keeps it in your Keychain and forgets it after \(w.expiryDays) days of not joining.")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 }.padding(.horizontal, 10).padding(.bottom, 4)
